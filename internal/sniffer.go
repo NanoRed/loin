@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"fmt"
+
 	"github.com/NanoRed/loin/pkg/goroutine"
 	"github.com/NanoRed/loin/pkg/logger"
 	"github.com/google/gopacket"
@@ -8,32 +10,40 @@ import (
 )
 
 type Sniffer struct {
-	handle *pcap.Handle
+	device *Device
 }
 
-func NewSniffer(device *Device, filter string) (sniffer *Sniffer) {
-	handle, err := pcap.OpenLive(device.Name, 65535, true, pcap.BlockForever)
+func NewSniffer(device *Device) (sniffer *Sniffer) {
+	var err error
+	device.handle, err = pcap.OpenLive(device.Id, 65535, true, pcap.BlockForever)
 	if err != nil {
 		logger.Panic("pcap openlive err:%v", err)
 	}
-	err = handle.SetBPFFilter(filter)
-	if err != nil {
-		logger.Panic("pcap handle set filter err:%v", err)
-	}
-
 	sniffer = &Sniffer{
-		handle: handle,
+		device: device,
 	}
 	return
 }
 
-func (s *Sniffer) HandlePackets(f func(*Packet)) {
-	packetSource := gopacket.NewPacketSource(s.handle, s.handle.LinkType())
-	for packet := range packetSource.Packets() {
-		goroutine.CommonPool.Add(goroutine.Task(func() { f(&Packet{packet}) }))
+func (s *Sniffer) ReadPackets(filter string, handle func(packet *Packet)) {
+	err := s.device.handle.SetBPFFilter(filter)
+	if err != nil {
+		logger.Panic("pcap handle set filter err:%v", err)
+	}
+	packetSource := gopacket.NewPacketSource(s.device.handle, s.device.handle.LinkType())
+	for p := range packetSource.Packets() {
+		goroutine.CommonPool.Add(goroutine.Task(func() { handle(&Packet{p}) }))
+	}
+}
+
+func (s *Sniffer) WritePackets(packet *Packet) {
+	fmt.Println(packet)
+	err := s.device.handle.WritePacketData(packet.Encode())
+	if err != nil {
+		logger.Error("failed to write packet:%v", err)
 	}
 }
 
 func (s *Sniffer) Close() {
-	s.handle.Close()
+	s.device.handle.Close()
 }

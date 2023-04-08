@@ -28,7 +28,7 @@ func (p *Pool) Add(task Task) {
 	case worker := <-p.Workers:
 		worker.Tasks <- task
 	default:
-		logger.Error("fail to add task, you may need to consider expanding the pool.")
+		logger.Error("failed to add task, you may need to consider expanding the pool.")
 	}
 }
 
