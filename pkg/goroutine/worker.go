@@ -5,9 +5,9 @@ type Worker struct {
 	Tasks chan Task
 }
 
-func NewWorker() (worker *Worker) {
+func NewWorker(cap int) (worker *Worker) {
 	worker = &Worker{
-		Tasks: make(chan Task),
+		Tasks: make(chan Task, cap),
 	}
 	return
 }
@@ -16,7 +16,6 @@ func (w *Worker) Start() {
 	go func() {
 		for f := range w.Tasks {
 			f()
-			w.Pool.Workers <- w
 		}
 	}()
 }

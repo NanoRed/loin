@@ -1,44 +1,35 @@
 package goroutine
 
 import (
-	"time"
+	"math/rand"
 
 	"github.com/NanoRed/loin/pkg/logger"
 )
 
+// var CommonPool *Pool = NewPool(3, 50)
+
 type Pool struct {
-	Workers chan *Worker
+	Workers []*Worker
 }
 
-func NewPool(workerNum int) (pool *Pool) {
+func NewPool(workerNum int, workerCap int) (pool *Pool) {
 	pool = &Pool{
-		Workers: make(chan *Worker, workerNum),
+		Workers: make([]*Worker, workerNum),
 	}
 	for i := 0; i < workerNum; i++ {
-		worker := NewWorker()
+		worker := NewWorker(workerCap)
 		worker.Start()
 		worker.Pool = pool
-		pool.Workers <- worker
+		pool.Workers[i] = worker
 	}
 	return
 }
 
 func (p *Pool) Add(task Task) {
 	select {
-	case worker := <-p.Workers:
-		worker.Tasks <- task
+	case p.Workers[rand.Intn(len(p.Workers))].Tasks <- task:
 	default:
-		logger.Error("failed to add task, you may need to consider expanding the pool.")
+		go task()
+		logger.Warn("failed to add task, you may need to consider expanding the pool.")
 	}
 }
-
-func (p *Pool) AddTimeout(task Task, timeout time.Duration) {
-	select {
-	case worker := <-p.Workers:
-		worker.Tasks <- task
-	case <-time.After(timeout):
-		logger.Error("adding task timeout, you may need to consider expanding the pool.")
-	}
-}
-
-var CommonPool *Pool = NewPool(10)
