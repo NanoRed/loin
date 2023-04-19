@@ -3,33 +3,28 @@ package internal
 import (
 	"bytes"
 	"net"
+	"sync"
 
 	"github.com/NanoRed/loin/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
-// type LayerKey uint8
-
-// const (
-// 	LayerEthernet LayerKey = iota
-// 	LayerARP
-// 	LayerIPv4
-// )
+var PacketPool = sync.Pool{New: func() any { return &Packet{} }}
 
 type Packet struct {
-	Obj gopacket.Packet
-	// Layers map[LayerKey]gopacket.Layer
+	Object gopacket.Packet
 }
 
-func (p *Packet) Encode() []byte {
-	return p.Obj.Data()
+func GetDirtyPacket() (packet *Packet) {
+	packet = PacketPool.Get().(*Packet)
+	return
 }
 
-func (p *Packet) MakeReqARPForObtainingGatewayMAC(adapter *Adapter) {
-	localIP := adapter.GetLocalIP()
-	localMAC := adapter.GetLocalMAC()
-	gatewayIP := adapter.GetGatewayIP()
+func MakeReqARPForGatewayMAC(commander *Commander) []byte {
+	localIP := commander.Adapter.GetLocalIP()
+	localMAC := commander.Adapter.GetLocalMAC()
+	gatewayIP := commander.Adapter.GetGatewayIP()
 	arp := &layers.ARP{
 		AddrType:          layers.LinkTypeEthernet,
 		Protocol:          layers.EthernetTypeIPv4,
@@ -56,14 +51,26 @@ func (p *Packet) MakeReqARPForObtainingGatewayMAC(adapter *Adapter) {
 	if err != nil {
 		logger.Error("make request arp for gateway error:%v", err)
 	}
-	p.Obj = gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+	return buffer.Bytes()
 }
 
-func (p *Packet) IsARPReplyFromGatewayMAC(adapter *Adapter) (srcMAC net.HardwareAddr, yes bool) {
-	if arpLayer := p.Obj.Layer(layers.LayerTypeARP); arpLayer != nil {
+func (p *Packet) Recycle() {
+	PacketPool.Put(p)
+}
+
+func (p *Packet) Encode() []byte {
+	return p.Object.Data()
+}
+
+func (p *Packet) Decode(data []byte) {
+	p.Object = gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+}
+
+func (p *Packet) IsARPReplyFromGatewayMAC(commander *Commander) (srcMAC net.HardwareAddr, yes bool) {
+	if arpLayer := p.Object.Layer(layers.LayerTypeARP); arpLayer != nil {
 		arp := arpLayer.(*layers.ARP)
 		if arp.Operation == layers.ARPReply &&
-			adapter.GetGatewayIP().Equal(arp.SourceProtAddress) {
+			commander.Adapter.GetGatewayIP().Equal(arp.SourceProtAddress) {
 			srcMAC = net.HardwareAddr(arp.SourceHwAddress)
 			yes = true
 		}
@@ -71,9 +78,9 @@ func (p *Packet) IsARPReplyFromGatewayMAC(adapter *Adapter) (srcMAC net.Hardware
 	return
 }
 
-func (p *Packet) IsIPv4DNSRequestFromConsole(adapter *Adapter) (srcIP net.IP, srcMAC net.HardwareAddr, yes bool) {
-	ethLayer := p.Obj.Layer(layers.LayerTypeEthernet)
-	ipLayer := p.Obj.Layer(layers.LayerTypeIPv4)
+func (p *Packet) IsIPv4DNSRequestFromConsole() (srcIP net.IP, srcMAC net.HardwareAddr, yes bool) {
+	ethLayer := p.Object.Layer(layers.LayerTypeEthernet)
+	ipLayer := p.Object.Layer(layers.LayerTypeIPv4)
 	if ethLayer != nil && ipLayer != nil {
 		eth := ethLayer.(*layers.Ethernet)
 		ip := ipLayer.(*layers.IPv4)
@@ -87,27 +94,27 @@ func (p *Packet) IsIPv4DNSRequestFromConsole(adapter *Adapter) (srcIP net.IP, sr
 	return
 }
 
-func (p *Packet) Repack(adapter *Adapter) []byte {
-	if ethLayer := p.Obj.Layer(layers.LayerTypeEthernet); ethLayer != nil {
+func (p *Packet) Repack(commander *Commander) (repackBytes []byte, toServer bool) {
+	if ethLayer := p.Object.Layer(layers.LayerTypeEthernet); ethLayer != nil {
 		eth := ethLayer.(*layers.Ethernet)
 		switch {
 
 		// from gateway
-		case bytes.Equal(eth.SrcMAC, adapter.GetGatewayMAC()):
-			if ipLayer := p.Obj.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+		case bytes.Equal(eth.SrcMAC, commander.Adapter.GetGatewayMAC()):
+			if ipLayer := p.Object.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip := ipLayer.(*layers.IPv4)
 
 				// forward the tcp packets
-				if tcpLayer := p.Obj.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+				if tcpLayer := p.Object.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 					tcp := tcpLayer.(*layers.TCP)
-					newDstPort, ok := PortProxy.GetNewDstPort(int(tcp.DstPort))
+					newDstPort, ok := commander.Proxy.GetNewDstPort(PortNumber(tcp.DstPort))
 					if ok {
-						eth.SrcMAC = adapter.GetLocalMAC()
-						eth.DstMAC = adapter.GetConsoleMAC()
-						ip.DstIP = adapter.GetConsoleIP()
+						eth.SrcMAC = commander.Adapter.GetLocalMAC()
+						eth.DstMAC = commander.Adapter.GetConsoleMAC()
+						ip.DstIP = commander.Adapter.GetConsoleIP()
 						tcp.DstPort = layers.TCPPort(newDstPort)
 						buffer := gopacket.NewSerializeBuffer()
-						tcp.SetNetworkLayerForChecksum(p.Obj.NetworkLayer())
+						tcp.SetNetworkLayerForChecksum(p.Object.NetworkLayer())
 						if err := gopacket.SerializeLayers(
 							buffer,
 							gopacket.SerializeOptions{
@@ -121,19 +128,20 @@ func (p *Packet) Repack(adapter *Adapter) []byte {
 						); err != nil {
 							logger.Error("repack the tcp to console error:%v", err)
 						}
-						return buffer.Bytes()
+						repackBytes = buffer.Bytes()
+						return
 					}
 
-				} else if udpLayer := p.Obj.Layer(layers.LayerTypeUDP); udpLayer != nil { // forward the udp packets
+				} else if udpLayer := p.Object.Layer(layers.LayerTypeUDP); udpLayer != nil { // forward the udp packets
 					udp := udpLayer.(*layers.UDP)
-					newDstPort, ok := PortProxy.GetNewDstPort(int(udp.DstPort))
+					newDstPort, ok := commander.Proxy.GetNewDstPort(PortNumber(udp.DstPort))
 					if ok {
-						eth.SrcMAC = adapter.GetLocalMAC()
-						eth.DstMAC = adapter.GetConsoleMAC()
-						ip.DstIP = adapter.GetConsoleIP()
+						eth.SrcMAC = commander.Adapter.GetLocalMAC()
+						eth.DstMAC = commander.Adapter.GetConsoleMAC()
+						ip.DstIP = commander.Adapter.GetConsoleIP()
 						udp.DstPort = layers.UDPPort(newDstPort)
 						buffer := gopacket.NewSerializeBuffer()
-						udp.SetNetworkLayerForChecksum(p.Obj.NetworkLayer())
+						udp.SetNetworkLayerForChecksum(p.Object.NetworkLayer())
 						if err := gopacket.SerializeLayers(
 							buffer,
 							gopacket.SerializeOptions{
@@ -147,20 +155,21 @@ func (p *Packet) Repack(adapter *Adapter) []byte {
 						); err != nil {
 							logger.Error("repack the udp to console error:%v", err)
 						}
-						return buffer.Bytes()
+						repackBytes = buffer.Bytes()
+						return
 					}
 				}
 			}
 
 		// from console
-		case bytes.Equal(eth.SrcMAC, adapter.GetConsoleMAC()):
-			if arpLayer := p.Obj.Layer(layers.LayerTypeARP); arpLayer != nil {
+		case bytes.Equal(eth.SrcMAC, commander.Adapter.GetConsoleMAC()):
+			if arpLayer := p.Object.Layer(layers.LayerTypeARP); arpLayer != nil {
 				arp := arpLayer.(*layers.ARP)
 
-				// reply the arp
-				if arp.Operation == layers.ARPRequest && adapter.GetLocalIP().Equal(arp.DstProtAddress) {
+				// reply the local mac to console
+				if commander.Adapter.GetLocalIP().Equal(arp.DstProtAddress) {
 					eth.DstMAC = eth.SrcMAC
-					eth.SrcMAC = adapter.GetLocalMAC()
+					eth.SrcMAC = commander.Adapter.GetLocalMAC()
 					arp.DstHwAddress = arp.SourceHwAddress
 					arp.SourceHwAddress = eth.SrcMAC
 					arp.DstProtAddress, arp.SourceProtAddress = arp.SourceProtAddress, arp.DstProtAddress
@@ -174,66 +183,88 @@ func (p *Packet) Repack(adapter *Adapter) []byte {
 					); err != nil {
 						logger.Error("repack the reply arp to console error:%v", err)
 					}
-					return buffer.Bytes()
+					repackBytes = buffer.Bytes()
+					return
 				}
-			} else if ipLayer := p.Obj.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+
+			} else if ipLayer := p.Object.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip := ipLayer.(*layers.IPv4)
 
-				// forward the tcp packets
-				if tcpLayer := p.Obj.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-					tcp := tcpLayer.(*layers.TCP)
-					newSrcPort, ok := PortProxy.GetNewSrcPort(PortTypeTCP, int(tcp.SrcPort), ip.DstIP, int(tcp.DstPort))
-					if ok {
-						eth.SrcMAC = adapter.GetLocalMAC()
-						eth.DstMAC = adapter.GetGatewayMAC()
-						ip.SrcIP = adapter.GetLocalIP()
-						tcp.SrcPort = layers.TCPPort(newSrcPort)
-						buffer := gopacket.NewSerializeBuffer()
-						tcp.SetNetworkLayerForChecksum(p.Obj.NetworkLayer())
-						if err := gopacket.SerializeLayers(
-							buffer,
-							gopacket.SerializeOptions{
-								FixLengths:       true,
-								ComputeChecksums: true,
-							},
-							eth,
-							ip,
-							tcp,
-							gopacket.Payload(tcpLayer.LayerPayload()),
-						); err != nil {
-							logger.Error("repack the tcp to gateway error:%v", err)
-						}
-						return buffer.Bytes()
-					}
+				// LAN packets
+				if commander.Adapter.Network.Contains(ip.DstIP) {
 
-				} else if udpLayer := p.Obj.Layer(layers.LayerTypeUDP); udpLayer != nil { // forward the udp packets
-					udp := udpLayer.(*layers.UDP)
-					newSrcPort, ok := PortProxy.GetNewSrcPort(PortTypeUDP, int(udp.SrcPort), ip.DstIP, int(udp.DstPort))
-					if ok {
-						eth.SrcMAC = adapter.GetLocalMAC()
-						eth.DstMAC = adapter.GetGatewayMAC()
-						ip.SrcIP = adapter.GetLocalIP()
-						udp.SrcPort = layers.UDPPort(newSrcPort)
-						buffer := gopacket.NewSerializeBuffer()
-						udp.SetNetworkLayerForChecksum(p.Obj.NetworkLayer())
-						if err := gopacket.SerializeLayers(
-							buffer,
-							gopacket.SerializeOptions{
-								FixLengths:       true,
-								ComputeChecksums: true,
-							},
-							eth,
-							ip,
-							udp,
-							gopacket.Payload(udpLayer.LayerPayload()),
-						); err != nil {
-							logger.Error("repack the udp to gateway error:%v", err)
+				} else { // internet packets
+
+					// forward the tcp packets
+					if tcpLayer := p.Object.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+						tcp := tcpLayer.(*layers.TCP)
+						newSrcPort, ok := commander.Proxy.GetNewSrcPort(
+							PortTypeTCP,
+							PortNumber(tcp.SrcPort),
+							ip.DstIP,
+							PortNumber(tcp.DstPort),
+						)
+						if ok {
+							eth.SrcMAC = commander.Adapter.GetLocalMAC()
+							eth.DstMAC = commander.Adapter.GetGatewayMAC()
+							ip.SrcIP = commander.Adapter.GetLocalIP()
+							tcp.SrcPort = layers.TCPPort(newSrcPort)
+							buffer := gopacket.NewSerializeBuffer()
+							tcp.SetNetworkLayerForChecksum(p.Object.NetworkLayer())
+							if err := gopacket.SerializeLayers(
+								buffer,
+								gopacket.SerializeOptions{
+									FixLengths:       true,
+									ComputeChecksums: true,
+								},
+								eth,
+								ip,
+								tcp,
+								gopacket.Payload(tcpLayer.LayerPayload()),
+							); err != nil {
+								logger.Error("repack the tcp to gateway error:%v", err)
+							}
+							repackBytes = buffer.Bytes()
+							return
 						}
-						return buffer.Bytes()
+
+					} else if udpLayer := p.Object.Layer(layers.LayerTypeUDP); udpLayer != nil { // forward the udp packets
+						udp := udpLayer.(*layers.UDP)
+						newSrcPort, ok := commander.Proxy.GetNewSrcPort(
+							PortTypeUDP,
+							PortNumber(udp.SrcPort),
+							ip.DstIP,
+							PortNumber(udp.DstPort),
+						)
+						if ok {
+							eth.SrcMAC = commander.Adapter.GetLocalMAC()
+							eth.DstMAC = commander.Adapter.GetGatewayMAC()
+							ip.SrcIP = commander.Adapter.GetLocalIP()
+							udp.SrcPort = layers.UDPPort(newSrcPort)
+							buffer := gopacket.NewSerializeBuffer()
+							udp.SetNetworkLayerForChecksum(p.Object.NetworkLayer())
+							if err := gopacket.SerializeLayers(
+								buffer,
+								gopacket.SerializeOptions{
+									FixLengths:       true,
+									ComputeChecksums: true,
+								},
+								eth,
+								ip,
+								udp,
+								gopacket.Payload(udpLayer.LayerPayload()),
+							); err != nil {
+								logger.Error("repack the udp to gateway error:%v", err)
+							}
+							repackBytes = buffer.Bytes()
+							return
+						}
 					}
 				}
 			}
+
+			logger.Info("other console packets need to be done:%v", p)
 		}
 	}
-	return nil
+	return
 }

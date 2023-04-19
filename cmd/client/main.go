@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/NanoRed/loin/internal"
 	"github.com/NanoRed/loin/pkg/logger"
@@ -13,9 +17,9 @@ func main() {
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
-			fmt.Println(string(debug.Stack()))
-			for {
-			}
+			debug.PrintStack()
+			var x int
+			fmt.Scanln(&x)
 		}
 	}()
 
@@ -26,23 +30,50 @@ func main() {
 	switch {
 	case count == 1:
 		adapter = adapters[0]
-		fmt.Printf("detected your network interface is \"%s\"\nnow please awake your console(nintendo switch)...\n\n", adapter.Description)
+		logger.Pure("Detected your network interface is \"%s\"", adapter.Description)
+		logger.Pure("Please awake your console(nintendo switch) and configure your console:")
+		logger.Pure("step 1) go to 'Internet Settings', then choose your network to 'Change Settings'")
+		logger.Pure("step 2) change the 'IP Address Settings' to manual and modify it like this:")
+		logger.Pure("\t- IP Address: %s(choose a static IP in your LAN)", adapter.GetNetwork())
+		logger.Pure("\t- Subnet Mask: %s", net.IP(adapter.GetNetwork().Mask))
+		logger.Pure("\t- Gateway: %s", adapter.GetLocalIP())
+		logger.Pure("step 3) change the 'DNS Settings' to manual and modify it like this:")
+		logger.Pure("\t- Primary DNS: %s", internal.PrimaryDNS.GetIP())
+		logger.Pure("\t- Secondary DNS: %s", internal.SecondaryDNS.GetIP())
+		logger.Pure("step 4) save the settings and 'Connect to This Network'")
 	case count > 1:
-		fmt.Println("please select a valid network interface:")
+		logger.Pure("Please select a valid network interface:")
 		for idx, adapter := range adapters {
-			fmt.Printf("[%d] %s\n", idx, adapter.Description)
+			logger.Pure("[%d] %s", idx, adapter.Description)
 		}
-		fmt.Print("\nenter the number:")
+		fmt.Print("Enter the number:")
 		var id int
 		fmt.Scanf("%d", &id)
 		adapter = adapters[id]
-		fmt.Printf("\nyou have chose \"%s\"\nnow please awake your console(nintendo switch)...\n\n", adapter.Description)
+		logger.Pure("You have chosen \"%s\"", adapter.Description)
+		logger.Pure("Please awake your console(nintendo switch) and configure your console.")
+		logger.Pure("step 1) go to 'Internet Settings', then choose your network to 'Change Settings'")
+		logger.Pure("step 2) change the 'IP Address Settings' to manual and modify it like this:")
+		logger.Pure("\t- IP Address: %s(choose a static IP in your LAN)", adapter.GetNetwork())
+		logger.Pure("\t- Subnet Mask: %s", net.IP(adapter.GetNetwork().Mask))
+		logger.Pure("\t- Gateway: %s", adapter.GetLocalIP())
+		logger.Pure("step 3) change the 'DNS Settings' to manual and modify it like this:")
+		logger.Pure("\t- Primary DNS: %s", internal.PrimaryDNS.GetIP())
+		logger.Pure("\t- Secondary DNS: %s", internal.SecondaryDNS.GetIP())
+		logger.Pure("step 4) save the settings and 'Connect to This Network'")
+
 	default:
-		logger.Panic("It seems you don't have a valid network interface.")
+		logger.Panic("it seems like you don't have a valid network interface")
 	}
 
-	// start capturing and dealing with the packets
-	sniffer := internal.NewSniffer(adapter)
-	defer sniffer.Close()
-	sniffer.Run()
+	// start forwarding the packets
+	commander := internal.NewCommander(adapter)
+	defer commander.OffDuty()
+	commander.OnDuty()
+
+	logger.Pure("It should work now, have fun :) [press 'ctrl+c' to exit]")
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM)
+	<-sig
 }

@@ -6,8 +6,6 @@ import (
 	"github.com/NanoRed/loin/pkg/logger"
 )
 
-// var CommonPool *Pool = NewPool(3, 50)
-
 type Pool struct {
 	Workers []*Worker
 }

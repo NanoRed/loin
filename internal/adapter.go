@@ -4,7 +4,6 @@ import (
 	"net"
 	"os/exec"
 	"strings"
-	"sync"
 
 	"github.com/NanoRed/loin/pkg/logger"
 	"github.com/google/gopacket/pcap"
@@ -15,11 +14,9 @@ type Adapter struct {
 	Name        string
 	Description string
 	Network     *net.IPNet
-	Local       *Device
-	Gateway     *Device
-	Console     *Device
-	Lock        sync.RWMutex
-	handle      *pcap.Handle
+	Local       *Endpoint
+	Gateway     *Endpoint
+	Console     *Endpoint
 }
 
 func LocalAdapters() (adapters []*Adapter) {
@@ -38,8 +35,8 @@ func LocalAdapters() (adapters []*Adapter) {
 					}
 					s := strings.IndexByte(ipnet, '/')
 					e := strings.IndexByte(ipnet[s:], ' ')
-					var netIP net.IP
-					netIP, adapter.Network, _ = net.ParseCIDR(ip + ipnet[s:s+e])
+					netIP, network, _ := net.ParseCIDR(ip + ipnet[s:s+e])
+					adapter.SetNetwork(network)
 					adapter.SetLocalIP(netIP)
 					adapter.SetLocalMAC(iface.HardwareAddr)
 					adapter.SetGatewayIP(net.ParseIP(gwip))
@@ -87,110 +84,76 @@ func netshGetConfig(ifaceName string) (params map[string]string) {
 	return params
 }
 
+func (d *Adapter) GetNetwork() (network *net.IPNet) {
+	return d.Network
+}
+
+func (d *Adapter) SetNetwork(network *net.IPNet) {
+	d.Network = network
+}
+
 func (d *Adapter) GetLocalIP() (ip net.IP) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Local != nil {
-	// 	ip = d.Local.GetIP()
-	// }
 	return d.Local.GetIP()
 }
 
 func (d *Adapter) SetLocalIP(ip net.IP) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Local == nil {
-		d.Local = &Device{}
+		d.Local = &Endpoint{}
 	}
 	d.Local.SetIP(ip.To4())
 }
 
 func (d *Adapter) GetLocalMAC() (mac net.HardwareAddr) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Local != nil {
-	// 	mac = d.Local.GetMAC()
-	// }
 	return d.Local.GetMAC()
 }
 
 func (d *Adapter) SetLocalMAC(mac net.HardwareAddr) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Local == nil {
-		d.Local = &Device{}
+		d.Local = &Endpoint{}
 	}
 	d.Local.SetMAC(mac)
 }
 
 func (d *Adapter) GetGatewayIP() (ip net.IP) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Gateway != nil {
-	// 	ip = d.Gateway.GetIP()
-	// }
 	return d.Gateway.GetIP()
 }
 
 func (d *Adapter) SetGatewayIP(ip net.IP) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Gateway == nil {
-		d.Gateway = &Device{}
+		d.Gateway = &Endpoint{}
 	}
 	d.Gateway.SetIP(ip.To4())
 }
 
 func (d *Adapter) GetGatewayMAC() (mac net.HardwareAddr) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Gateway != nil {
-	// 	mac = d.Gateway.GetMAC()
-	// }
 	return d.Gateway.GetMAC()
 }
 
 func (d *Adapter) SetGatewayMAC(mac net.HardwareAddr) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Gateway == nil {
-		d.Gateway = &Device{}
+		d.Gateway = &Endpoint{}
 	}
 	d.Gateway.SetMAC(mac)
 }
 
 func (d *Adapter) GetConsoleIP() (ip net.IP) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Console != nil {
-	// 	ip = d.Console.GetIP()
-	// }
 	return d.Console.GetIP()
 }
 
 func (d *Adapter) SetConsoleIP(ip net.IP) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Console == nil {
-		d.Console = &Device{}
+		d.Console = &Endpoint{}
 	}
 	d.Console.SetIP(ip.To4())
 }
 
 func (d *Adapter) GetConsoleMAC() (mac net.HardwareAddr) {
-	// d.Lock.RLock()
-	// defer d.Lock.RUnlock()
-	// if d.Console != nil {
-	// 	mac = d.Console.GetMAC()
-	// }
 	return d.Console.GetMAC()
 }
 
 func (d *Adapter) SetConsoleMAC(mac net.HardwareAddr) {
-	// d.Lock.Lock()
-	// defer d.Lock.Unlock()
 	if d.Console == nil {
-		d.Console = &Device{}
+		d.Console = &Endpoint{}
 	}
 	d.Console.SetMAC(mac)
 }
