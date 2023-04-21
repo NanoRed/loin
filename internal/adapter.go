@@ -22,11 +22,11 @@ type Adapter struct {
 func LocalAdapters() (adapters []*Adapter) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		logger.Panic("failed to get interfaces 1:%v", err)
+		logger.Panic("failed to get local interfaces 1:%v", err)
 	}
 	mapping := make(map[string]*Adapter)
 	for _, iface := range ifaces {
-		params := netshGetConfig(iface.Name)
+		params := WinGetInterfaceConfig(iface.Name)
 		if ip, ok := params["IP Address"]; ok {
 			if ipnet, ok := params["Subnet Prefix"]; ok {
 				if gwip, ok := params["Default Gateway"]; ok {
@@ -47,7 +47,7 @@ func LocalAdapters() (adapters []*Adapter) {
 	}
 	ifacesPcap, err := pcap.FindAllDevs()
 	if err != nil {
-		logger.Panic("failed to get interfaces 2:%v", err)
+		logger.Panic("failed to get local interfaces 2:%v", err)
 	}
 	adapters = make([]*Adapter, 0, 4)
 	for _, iface := range ifacesPcap {
@@ -63,7 +63,7 @@ func LocalAdapters() (adapters []*Adapter) {
 	return
 }
 
-func netshGetConfig(ifaceName string) (params map[string]string) {
+func WinGetInterfaceConfig(ifaceName string) (params map[string]string) {
 	cmd := exec.Command(
 		"netsh",
 		"interface",
@@ -73,15 +73,59 @@ func netshGetConfig(ifaceName string) (params map[string]string) {
 		"name="+ifaceName,
 	)
 	out, _ := cmd.CombinedOutput()
-	lines := strings.Split(string(out), "\n")
 	params = make(map[string]string)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if kv := strings.Split(line, ":"); len(kv) == 2 {
+	for _, line := range strings.Split(string(out), "\n") {
+		if kv := strings.Split(strings.TrimSpace(line), ":"); len(kv) == 2 {
 			params[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
 		}
 	}
 	return params
+}
+
+func ServerAdapter() (adapter *Adapter) {
+	var gatewayIP net.IP
+	cmd := exec.Command("route", "-n")
+	out, _ := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line[0:7] == "0.0.0.0" {
+			fields := strings.Fields(line)
+			gatewayIP = net.ParseIP(fields[1]).To4()
+			break
+		}
+	}
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			switch v := addr.(type) {
+			case *net.IPNet:
+				if v.IP.IsGlobalUnicast() && v.Contains(gatewayIP) {
+					adapter = &Adapter{
+						Name:    iface.Name,
+						Network: v,
+						Local: &Endpoint{
+							&Address{
+								IP:  v.IP,
+								MAC: iface.HardwareAddr,
+								Port: &Port{
+									Type:   LANServer.GetPort().GetType(),
+									Number: LANServer.GetPort().GetNumber(),
+								},
+							},
+						},
+						Gateway: &Endpoint{
+							&Address{
+								IP: gatewayIP,
+							},
+						},
+					}
+					return
+				}
+			}
+		}
+	}
+	return
 }
 
 func (d *Adapter) GetNetwork() (network *net.IPNet) {

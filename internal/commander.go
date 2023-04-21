@@ -67,10 +67,6 @@ func (c *Commander) SwapSnifferHandle(newHandle func(*Packet)) {
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&c.Handle)), unsafe.Pointer(&newHandle))
 }
 
-func (c *Commander) Write(data []byte) (err error) {
-	return c.Sniffer.WritePacketData(data)
-}
-
 func (c *Commander) StartToCapture() {
 	c.BlockPackets()
 	discard := func(*Packet) { logger.Warn("this log should not appear") }
@@ -101,7 +97,7 @@ func (c *Commander) AcquireGatewayMAC() {
 		p.Recycle()
 	})
 	c.SetFilter("src host %s", c.Adapter.GetGatewayIP())
-	if err := c.Write(MakeReqARPForGatewayMAC(c)); err != nil {
+	if err := c.Sniffer.WritePacketData(MakeReqARPForGatewayMAC(c)); err != nil {
 		logger.Error("failed to write request arp packet:%v", err)
 	}
 	sig <- struct{}{}
@@ -181,24 +177,38 @@ func (c *Commander) ConnectToServer(a ...any) {
 				logger.Error("failed to read next frame:%v", err)
 				return
 			}
-			go func() {
-				defer c.Client.Close()
-				switch frame.Type {
-				case CliEndToEnd:
-					// TODO
-				case CliBroadcast:
-					// TODO
-				case CliResponse:
-					switch frame.Reserved {
-					case 0:
-						// successful, no need to do anything
-					case 1:
-						logger.Warn("request failed:%s", frame.Payload)
-					case 2:
-						logger.Error("request failed:%s", frame.Payload)
-						return
+			switch frame.Type {
+			case CliEndToEnd:
+				go func() {
+					dp := GetDirtyPacket()
+					dp.Decode(frame.Payload)
+					if err := c.Sniffer.WritePacketData(dp.ModifyLANIPv4(c)); err != nil {
+						logger.Error("failed to write LAN ipv4:%v", err)
 					}
-				case CliJunction:
+					dp.Recycle()
+				}()
+			case CliBroadcast:
+				switch frame.Reserved {
+				case 0: // gratuitous arp
+					go func() {
+						dp := GetDirtyPacket()
+						dp.Decode(frame.Payload)
+						if err := c.Sniffer.WritePacketData(dp.ModifyLANGratuitousARP(c)); err != nil {
+							logger.Error("failed to write gratuitous arp:%v", err)
+						}
+						dp.Recycle()
+					}()
+				}
+			case CliResponse:
+				switch frame.Reserved {
+				case 1:
+					logger.Warn("request failed:%s", frame.Payload)
+				case 2:
+					logger.Error("request failed:%s", frame.Payload)
+					return
+				}
+			case CliJunction:
+				go func() {
 					c.Junction.DecodeGuide(frame.Payload)
 					var message bytes.Buffer
 					consoleIP := c.Adapter.GetConsoleIP().String()
@@ -212,22 +222,23 @@ func (c *Commander) ConnectToServer(a ...any) {
 					})
 					logger.Pure("Clients updated:%s", message.Bytes())
 					<-block
-				default:
-					logger.Error("unknown frame type")
-				}
-			}()
+				}()
+			default:
+				logger.Error("unknown frame type")
+				return
+			}
 		}
 	}()
 }
 
 func (c *Commander) ForwardPackets() {
 	c.SwapSnifferHandle(func(p *Packet) {
-		if repackBytes, toServer := p.Repack(c); repackBytes != nil {
-			if toServer {
-
-			} else if err := c.Write(repackBytes); err != nil {
+		if packetBytes, frameBytes := p.Repack(c); packetBytes != nil {
+			if err := c.Sniffer.WritePacketData(packetBytes); err != nil {
 				logger.Error("failed to write repack packet:%v", err)
 			}
+		} else if _, err := c.Client.SafeWrite(frameBytes); err != nil {
+			logger.Error("failed to write repack frame to server:%v", err)
 		}
 		p.Recycle()
 	})

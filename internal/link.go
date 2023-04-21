@@ -22,8 +22,8 @@ type Link struct {
 
 func Dial(endpoint *Endpoint) (link *Link, err error) {
 	conn, err := net.Dial(
-		endpoint.Address.Port.GetType().String(),
-		endpoint.Address.GetIPPort(),
+		endpoint.GetPort().GetType().String(),
+		endpoint.GetIPPort(),
 	)
 	if err != nil {
 		return
@@ -37,8 +37,8 @@ func Dial(endpoint *Endpoint) (link *Link, err error) {
 
 func DialWithSelfDestruction(endpoint *Endpoint, destruct func(link *Link)) (link *Link, err error) {
 	conn, err := net.Dial(
-		endpoint.Address.Port.GetType().String(),
-		endpoint.Address.GetIPPort(),
+		endpoint.GetPort().GetType().String(),
+		endpoint.GetIPPort(),
 	)
 	if err != nil {
 		return

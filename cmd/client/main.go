@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/NanoRed/loin/internal"
 	"github.com/NanoRed/loin/pkg/logger"
@@ -18,8 +19,10 @@ func main() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
 			debug.PrintStack()
-			var x int
-			fmt.Scanln(&x)
+			for i := 5; i > 0; i-- {
+				logger.Pure("Close automatically in %d seconds...", i)
+				time.Sleep(time.Second)
+			}
 		}
 	}()
 
@@ -66,7 +69,7 @@ func main() {
 		logger.Panic("it seems like you don't have a valid network interface")
 	}
 
-	// start forwarding the packets
+	// start to forward the packets
 	commander := internal.NewCommander(adapter)
 	defer commander.OffDuty()
 	commander.OnDuty()

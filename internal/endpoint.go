@@ -59,12 +59,12 @@ type Address struct {
 	Port *Port
 }
 
-func (a *Address) GetIPPort() string {
-	return fmt.Sprintf("%s:%d", a.IP, a.Port.Number)
-}
-
 type Endpoint struct {
 	Address *Address
+}
+
+func (e *Endpoint) GetIPPort() string {
+	return fmt.Sprintf("%s:%d", e.Address.IP, e.Address.Port.Number)
 }
 
 func (e *Endpoint) GetIP() (ip net.IP) {

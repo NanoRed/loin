@@ -15,17 +15,17 @@ var (
 type FrameType uint8
 
 const (
-	SrvEndToEnd FrameType = iota
-	SrvBroadcast
-	SrvHeartbeat
-	SrvRegister
+	SrvEndToEnd  FrameType = iota // Reserved: console ID in the junction
+	SrvBroadcast                  // Reserved: [0]gratuitous arp
+	SrvHeartbeat                  // Reserved: not used
+	SrvRegister                   // Reserved: not used
 )
 
 const (
-	CliEndToEnd FrameType = iota
-	CliBroadcast
-	CliResponse
-	CliJunction
+	CliEndToEnd  FrameType = iota // Reserved: console ID in the junction
+	CliBroadcast                  // Reserved: [0]gratuitous arp
+	CliResponse                   // Reserved: [0]successful [1]failed [2]fatal(client will reconnect)
+	CliJunction                   // Reserved: not used
 )
 
 type Frame struct {

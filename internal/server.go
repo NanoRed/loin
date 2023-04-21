@@ -9,34 +9,34 @@ import (
 )
 
 type Server struct {
+	Endpoint *Endpoint
 	Junction *Junction
 }
 
-func NewServer() *Server {
+func NewServer(endpoint *Endpoint) *Server {
 	return &Server{
+		Endpoint: endpoint,
 		Junction: NewJunction(),
 	}
 }
 
-func (s *Server) ListenAndServe(address *Address) {
+func (s *Server) ListenAndServe() {
 	ln, err := net.Listen(
-		address.Port.Type.String(),
-		address.GetIPPort(),
+		s.Endpoint.Address.Port.Type.String(),
+		s.Endpoint.GetIPPort(),
 	)
 	if err != nil {
 		logger.Panic("failed to listen the address:%v", err)
 	}
-	go func() {
-		defer ln.Close()
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				logger.Error("failed to accept connection:%v", err)
-				continue
-			}
-			go s.Handle(&Link{Conn: conn})
+	defer ln.Close()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			logger.Error("failed to accept connection:%v", err)
+			continue
 		}
-	}()
+		go s.Handle(&Link{Conn: conn})
+	}
 }
 
 func (s *Server) Handle(link *Link) {
@@ -91,7 +91,7 @@ func (s *Server) Handle(link *Link) {
 					Payload: s.Junction.EncodeGuide(),
 				}
 				frameBytes := frame.Encode()
-				// broadcast the IDMap
+				// broadcast the junction guide
 				s.Junction.Range(func(key string, id int, link *Link) {
 					go func() {
 						if _, err := link.SafeWrite(frameBytes); err != nil {
@@ -103,7 +103,7 @@ func (s *Server) Handle(link *Link) {
 			} else {
 				frame := &Frame{
 					Type:     CliResponse,
-					Reserved: 2, // 0 means successful, 1 means fail, 2 means fatal
+					Reserved: 2,
 					Payload:  []byte("failed to register to the junction in server"),
 				}
 				if _, err := link.SafeWrite(frame.Encode()); err != nil {
