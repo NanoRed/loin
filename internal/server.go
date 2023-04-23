@@ -73,9 +73,11 @@ func (s *Server) Handle(link *Link) {
 			frameBytes := b.Bytes()
 			s.Junction.Range(func(key string, id int, link *Link) {
 				go func() {
-					if _, err := link.SafeWrite(frameBytes); err != nil {
-						logger.Error("failed to write junction frame:%d %v", id, err)
-						link.Close()
+					if id != frame.Reserved {
+						if _, err := link.SafeWrite(frameBytes); err != nil {
+							logger.Error("failed to write junction frame:%d %v", id, err)
+							link.Close()
+						}
 					}
 				}()
 			})
@@ -86,6 +88,7 @@ func (s *Server) Handle(link *Link) {
 			link.From.Decode(frame.Payload)
 			if id, ok := s.Junction.Register(link); ok {
 				defer s.Junction.Unregister(id)
+				logger.Info("%s successfully registered", link.From.GetIP().String())
 				frame := &Frame{
 					Type:    CliJunction,
 					Payload: s.Junction.EncodeGuide(),
@@ -101,6 +104,7 @@ func (s *Server) Handle(link *Link) {
 					}()
 				})
 			} else {
+				logger.Warn("%s failed to register", link.From.GetIP().String())
 				frame := &Frame{
 					Type:     CliResponse,
 					Reserved: 2,

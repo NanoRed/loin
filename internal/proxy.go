@@ -48,12 +48,12 @@ func (p *Proxy) GetNewSrcPort(
 		logger.Error("failed to occupy a port:%v", err)
 		return
 	}
+	newSrcPort, ok = link.GetPort(), true
 	p.Lock.Lock()
 	p.SrcTable[srcPort] = newSrcPort
 	p.DstTable[newSrcPort] = srcPort
 	p.Links[link] = struct{}{}
 	p.Lock.Unlock()
-	newSrcPort, ok = link.GetPort(), true
 	return
 }
 

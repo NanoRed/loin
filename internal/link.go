@@ -15,7 +15,6 @@ var (
 
 type Link struct {
 	Conn net.Conn
-	To   *Endpoint
 	From *Endpoint
 	Lock sync.Mutex
 }
@@ -30,7 +29,6 @@ func Dial(endpoint *Endpoint) (link *Link, err error) {
 	}
 	link = &Link{
 		Conn: conn,
-		To:   endpoint,
 	}
 	return
 }

@@ -9,21 +9,22 @@ import (
 )
 
 var (
-	HeartbeatInterval time.Duration = time.Second * 5
+	HeartbeatInterval time.Duration = time.Second * 12
+	HeartFailedLimit  int           = 5
 )
 
 type FrameType uint8
 
 const (
-	SrvEndToEnd  FrameType = iota // Reserved: console ID in the junction
-	SrvBroadcast                  // Reserved: [0]gratuitous arp
+	SrvEndToEnd  FrameType = iota // Reserved: destination console ID
+	SrvBroadcast                  // Reserved: source console ID
 	SrvHeartbeat                  // Reserved: not used
 	SrvRegister                   // Reserved: not used
 )
 
 const (
-	CliEndToEnd  FrameType = iota // Reserved: console ID in the junction
-	CliBroadcast                  // Reserved: [0]gratuitous arp
+	CliEndToEnd  FrameType = iota // Reserved: destination console ID
+	CliBroadcast                  // Reserved: source console ID
 	CliResponse                   // Reserved: [0]successful [1]failed [2]fatal(client will reconnect)
 	CliJunction                   // Reserved: not used
 )

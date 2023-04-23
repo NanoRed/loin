@@ -3,6 +3,7 @@ package internal
 import (
 	"net"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/NanoRed/loin/pkg/logger"
@@ -82,18 +83,36 @@ func WinGetInterfaceConfig(ifaceName string) (params map[string]string) {
 	return params
 }
 
-func ServerAdapter() (adapter *Adapter) {
-	var gatewayIP net.IP
-	cmd := exec.Command("route", "-n")
-	out, _ := cmd.CombinedOutput()
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line[0:7] == "0.0.0.0" {
-			fields := strings.Fields(line)
-			gatewayIP = net.ParseIP(fields[1]).To4()
-			break
+func GetGatewayIP() (ip net.IP) {
+	switch runtime.GOOS {
+	case "windows":
+		cmd := exec.Command("route", "print", "-4")
+		out, _ := cmd.CombinedOutput()
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Index(line, "0.0.0.0") == 0 {
+				fields := strings.Fields(line)
+				ip = net.ParseIP(fields[2]).To4()
+				return
+			}
+		}
+	case "linux":
+		cmd := exec.Command("route", "-n")
+		out, _ := cmd.CombinedOutput()
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Index(line, "0.0.0.0") == 0 {
+				fields := strings.Fields(line)
+				ip = net.ParseIP(fields[1]).To4()
+				return
+			}
 		}
 	}
+	return
+}
+
+func LocalAdapter() (adapter *Adapter) {
+	gatewayIP := GetGatewayIP()
 	ifaces, _ := net.Interfaces()
 	for _, iface := range ifaces {
 		addrs, _ := iface.Addrs()
@@ -102,11 +121,59 @@ func ServerAdapter() (adapter *Adapter) {
 			case *net.IPNet:
 				if v.IP.IsGlobalUnicast() && v.Contains(gatewayIP) {
 					adapter = &Adapter{
-						Name:    iface.Name,
-						Network: v,
+						Name: iface.Name,
+						Network: &net.IPNet{
+							IP:   v.IP.Mask(v.Mask),
+							Mask: v.Mask,
+						},
 						Local: &Endpoint{
 							&Address{
-								IP:  v.IP,
+								IP:  v.IP.To4(),
+								MAC: iface.HardwareAddr,
+							},
+						},
+						Gateway: &Endpoint{
+							&Address{
+								IP: gatewayIP,
+							},
+						},
+					}
+					ifacesPcap, _ := pcap.FindAllDevs()
+					for _, ifacePcap := range ifacesPcap {
+						for i := 0; i < len(ifacePcap.Addresses); i++ {
+							if v.IP.Equal(ifacePcap.Addresses[i].IP) {
+								adapter.Id = ifacePcap.Name
+								adapter.Description = ifacePcap.Description
+								return
+							}
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+	return
+}
+
+func ServerAdapter() (adapter *Adapter) {
+	gatewayIP := GetGatewayIP()
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			switch v := addr.(type) {
+			case *net.IPNet:
+				if v.IP.IsGlobalUnicast() && v.Contains(gatewayIP) {
+					adapter = &Adapter{
+						Name: iface.Name,
+						Network: &net.IPNet{
+							IP:   v.IP.Mask(v.Mask),
+							Mask: v.Mask,
+						},
+						Local: &Endpoint{
+							&Address{
+								IP:  v.IP.To4(),
 								MAC: iface.HardwareAddr,
 								Port: &Port{
 									Type:   LANServer.GetPort().GetType(),

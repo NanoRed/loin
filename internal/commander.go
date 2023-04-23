@@ -166,7 +166,11 @@ func (c *Commander) ConnectToServer(a ...any) {
 				}
 				if _, err := c.Client.SafeWrite(frame.Encode()); err != nil {
 					logger.Error("failed to write heartbeat frame:%v", err)
-					return
+					if HeartFailedLimit--; HeartFailedLimit == 0 {
+						return
+					}
+				} else {
+					HeartFailedLimit = 5
 				}
 			}
 		}()
@@ -188,17 +192,14 @@ func (c *Commander) ConnectToServer(a ...any) {
 					dp.Recycle()
 				}()
 			case CliBroadcast:
-				switch frame.Reserved {
-				case 0: // gratuitous arp
-					go func() {
-						dp := GetDirtyPacket()
-						dp.Decode(frame.Payload)
-						if err := c.Sniffer.WritePacketData(dp.ModifyLANGratuitousARP(c)); err != nil {
-							logger.Error("failed to write gratuitous arp:%v", err)
-						}
-						dp.Recycle()
-					}()
-				}
+				go func() {
+					dp := GetDirtyPacket()
+					dp.Decode(frame.Payload)
+					if err := c.Sniffer.WritePacketData(dp.ModifyLANGratuitousARP(c)); err != nil {
+						logger.Error("failed to write gratuitous arp:%v", err)
+					}
+					dp.Recycle()
+				}()
 			case CliResponse:
 				switch frame.Reserved {
 				case 1:

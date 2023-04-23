@@ -15,15 +15,13 @@ func main() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
 			debug.PrintStack()
-			for i := 5; i > 0; i-- {
-				logger.Pure("Close automatically in %d seconds...", i)
-				time.Sleep(time.Second)
-			}
+			logger.Pure("Close automatically in 1 minute...")
+			time.Sleep(time.Minute)
 		}
 	}()
 
 	// start to serve
-	logger.Pure("loin-server started")
+	logger.Pure("loin server started")
 	adapter := internal.ServerAdapter()
 	internal.NewServer(adapter.Local).ListenAndServe()
 }

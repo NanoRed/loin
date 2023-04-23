@@ -167,12 +167,15 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 
 					// gratuitous arp, tell other devices its mac
 					if bytes.Equal(arp.SourceProtAddress, arp.DstProtAddress) {
-						frame := &Frame{
-							Type:    SrvBroadcast,
-							Payload: p.Object.Data(),
+						if id, ok := commander.Junction.GetID(net.IP(arp.SourceProtAddress).String()); ok {
+							frame := &Frame{
+								Type:     SrvBroadcast,
+								Reserved: id,
+								Payload:  p.Object.Data(),
+							}
+							frameBytes = frame.Encode()
+							return
 						}
-						frameBytes = frame.Encode()
-						return
 
 					} else if _, ok := commander.Junction.GetID(net.IP(arp.DstProtAddress).String()); ok ||
 						commander.Adapter.GetLocalIP().Equal(arp.DstProtAddress) { // reply LAN mac(i.e. local mac)
@@ -278,6 +281,28 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 							packetBytes = buffer.Bytes()
 							return
 						}
+
+					} else if icmpLayer := p.Object.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+						// // for safety and performance, we should ignore this icmp packet
+						// eth.SrcMAC = commander.Adapter.GetLocalMAC()
+						// eth.DstMAC = commander.Adapter.GetGatewayMAC()
+						// ip.SrcIP = commander.Adapter.GetLocalIP()
+						// buffer := gopacket.NewSerializeBuffer()
+						// if err := gopacket.SerializeLayers(
+						// 	buffer,
+						// 	gopacket.SerializeOptions{
+						// 		FixLengths:       true,
+						// 		ComputeChecksums: true,
+						// 	},
+						// 	eth,
+						// 	ip,
+						// 	gopacket.Payload(icmpLayer.LayerPayload()),
+						// ); err != nil {
+						// 	logger.Error("repack the icmp to gateway error:%v", err)
+						// }
+						// packetBytes = buffer.Bytes()
+						return
+
 					}
 				}
 			}
@@ -288,6 +313,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 	return
 }
 
+// TODO make in the local client
 func (p *Packet) ModifyLANGratuitousARP(commander *Commander) []byte {
 	// eth.DstMAC: ff:ff:ff:ff:ff:ff
 	// arp.DstHwAddress: 00:00:00:00:00:00
@@ -307,6 +333,7 @@ func (p *Packet) ModifyLANGratuitousARP(commander *Commander) []byte {
 	return buffer.Bytes()
 }
 
+// TODO save local mac and console mac to the clients
 func (p *Packet) ModifyLANIPv4(commander *Commander) []byte {
 	ethLayer := p.Object.Layer(layers.LayerTypeEthernet)
 	eth := ethLayer.(*layers.Ethernet)
