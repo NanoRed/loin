@@ -14,9 +14,10 @@ var (
 )
 
 type Link struct {
-	Conn net.Conn
-	From *Endpoint
-	Lock sync.Mutex
+	Conn  net.Conn
+	Agent *Endpoint
+	From  *Endpoint
+	Lock  sync.Mutex
 }
 
 func Dial(endpoint *Endpoint) (link *Link, err error) {

@@ -34,7 +34,7 @@ func (p *Proxy) GetNewSrcPort(
 	p.Lock.RUnlock()
 	// occupy a port
 	link, err := DialWithSelfDestruction(
-		&Endpoint{Address: &Address{IP: dstIP.To4(), Port: &Port{portType, dstPort}}},
+		&Endpoint{Address: &Address{IPNet: &net.IPNet{IP: dstIP}, Port: &Port{portType, dstPort}}},
 		func(l *Link) {
 			linkport := l.GetPort()
 			p.Lock.Lock()

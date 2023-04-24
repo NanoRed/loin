@@ -2,8 +2,8 @@ package internal
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,7 +97,7 @@ func (c *Commander) AcquireGatewayMAC() {
 		p.Recycle()
 	})
 	c.SetFilter("src host %s", c.Adapter.GetGatewayIP())
-	if err := c.Sniffer.WritePacketData(MakeReqARPForGatewayMAC(c)); err != nil {
+	if err := c.Sniffer.WritePacketData(MakeRequestGatewayARP(c)); err != nil {
 		logger.Error("failed to write request arp packet:%v", err)
 	}
 	sig <- struct{}{}
@@ -148,9 +148,16 @@ func (c *Commander) ConnectToServer(a ...any) {
 		go func() {
 			defer c.Client.Close()
 			// register
+			var buffer bytes.Buffer
+			agentData := c.Adapter.Local.Encode()
+			agentDataSize := make([]byte, 2)
+			binary.BigEndian.PutUint16(agentDataSize, uint16(len(agentData)))
+			buffer.Write(agentDataSize)
+			buffer.Write(agentData)
+			buffer.Write(c.Adapter.Console.Encode())
 			frame := &Frame{
 				Type:    SrvRegister,
-				Payload: c.Adapter.Console.Encode(),
+				Payload: buffer.Bytes(),
 			}
 			if _, err := c.Client.SafeWrite(frame.Encode()); err != nil {
 				logger.Error("failed to register:%v", err)
@@ -184,21 +191,15 @@ func (c *Commander) ConnectToServer(a ...any) {
 			switch frame.Type {
 			case CliEndToEnd:
 				go func() {
-					dp := GetDirtyPacket()
-					dp.Decode(frame.Payload)
-					if err := c.Sniffer.WritePacketData(dp.ModifyLANIPv4(c)); err != nil {
+					if err := c.Sniffer.WritePacketData(frame.Payload); err != nil {
 						logger.Error("failed to write LAN ipv4:%v", err)
 					}
-					dp.Recycle()
 				}()
 			case CliBroadcast:
 				go func() {
-					dp := GetDirtyPacket()
-					dp.Decode(frame.Payload)
-					if err := c.Sniffer.WritePacketData(dp.ModifyLANGratuitousARP(c)); err != nil {
+					if err := c.Sniffer.WritePacketData(MakeGratuitousARP(c, frame.Reserved)); err != nil {
 						logger.Error("failed to write gratuitous arp:%v", err)
 					}
-					dp.Recycle()
 				}()
 			case CliResponse:
 				switch frame.Reserved {
@@ -210,15 +211,14 @@ func (c *Commander) ConnectToServer(a ...any) {
 				}
 			case CliJunction:
 				go func() {
-					c.Junction.DecodeGuide(frame.Payload)
+					c.Junction.Decode(frame.Payload)
 					var message bytes.Buffer
-					consoleIP := c.Adapter.GetConsoleIP().String()
-					c.Junction.Range(func(key string, id int, link *Link) {
+					c.Junction.Range(func(key byte, id int, link *Link) {
 						message.WriteByte('[')
-						if strings.Compare(key, consoleIP) == 0 {
+						if id == frame.Reserved {
 							message.WriteString("* ")
 						}
-						message.WriteString(key)
+						message.WriteString(link.From.GetIP().String())
 						message.WriteByte(']')
 					})
 					logger.Pure("Clients updated:%s", message.Bytes())

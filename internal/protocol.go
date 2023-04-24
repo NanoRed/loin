@@ -26,7 +26,7 @@ const (
 	CliEndToEnd  FrameType = iota // Reserved: destination console ID
 	CliBroadcast                  // Reserved: source console ID
 	CliResponse                   // Reserved: [0]successful [1]failed [2]fatal(client will reconnect)
-	CliJunction                   // Reserved: not used
+	CliJunction                   // Reserved: destination console ID
 )
 
 type Frame struct {

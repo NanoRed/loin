@@ -21,7 +21,7 @@ func GetDirtyPacket() (packet *Packet) {
 	return
 }
 
-func MakeReqARPForGatewayMAC(commander *Commander) []byte {
+func MakeRequestGatewayARP(commander *Commander) []byte {
 	localIP := commander.Adapter.GetLocalIP()
 	localMAC := commander.Adapter.GetLocalMAC()
 	gatewayIP := commander.Adapter.GetGatewayIP()
@@ -49,7 +49,39 @@ func MakeReqARPForGatewayMAC(commander *Commander) []byte {
 		arp,
 	)
 	if err != nil {
-		logger.Error("make request arp for gateway error:%v", err)
+		logger.Error("failed to make request gateway arp:%v", err)
+	}
+	return buffer.Bytes()
+}
+
+func MakeGratuitousARP(commander *Commander, fromId int) []byte {
+	localMAC := commander.Adapter.GetLocalMAC()
+	fromIP := commander.Adapter.Local.LocalizeIP(commander.Junction.Hub[fromId].From.GetIP())
+	arp := &layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   localMAC,
+		SourceProtAddress: fromIP,
+		DstHwAddress:      net.HardwareAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		DstProtAddress:    fromIP,
+	}
+	eth := &layers.Ethernet{
+		SrcMAC:       localMAC,
+		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		EthernetType: layers.EthernetTypeARP,
+	}
+	buffer := gopacket.NewSerializeBuffer()
+	err := gopacket.SerializeLayers(
+		buffer,
+		gopacket.SerializeOptions{},
+		eth,
+		arp,
+	)
+	if err != nil {
+		logger.Error("failed to make gratuitous ARP:%v", err)
 	}
 	return buffer.Bytes()
 }
@@ -123,6 +155,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 							gopacket.Payload(tcpLayer.LayerPayload()),
 						); err != nil {
 							logger.Error("repack the tcp to console error:%v", err)
+							return
 						}
 						packetBytes = buffer.Bytes()
 						return
@@ -150,6 +183,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 							gopacket.Payload(udpLayer.LayerPayload()),
 						); err != nil {
 							logger.Error("repack the udp to console error:%v", err)
+							return
 						}
 						packetBytes = buffer.Bytes()
 						return
@@ -167,17 +201,16 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 
 					// gratuitous arp, tell other devices its mac
 					if bytes.Equal(arp.SourceProtAddress, arp.DstProtAddress) {
-						if id, ok := commander.Junction.GetID(net.IP(arp.SourceProtAddress).String()); ok {
+						if id, ok := commander.Junction.GetID(arp.SourceProtAddress[3]); ok {
 							frame := &Frame{
 								Type:     SrvBroadcast,
 								Reserved: id,
-								Payload:  p.Object.Data(),
 							}
 							frameBytes = frame.Encode()
 							return
 						}
 
-					} else if _, ok := commander.Junction.GetID(net.IP(arp.DstProtAddress).String()); ok ||
+					} else if _, ok := commander.Junction.GetID(arp.DstProtAddress[3]); ok ||
 						commander.Adapter.GetLocalIP().Equal(arp.DstProtAddress) { // reply LAN mac(i.e. local mac)
 						eth.DstMAC = eth.SrcMAC
 						eth.SrcMAC = commander.Adapter.GetLocalMAC()
@@ -193,6 +226,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 							arp,
 						); err != nil {
 							logger.Error("repack the reply arp to console error:%v", err)
+							return
 						}
 						packetBytes = buffer.Bytes()
 						return
@@ -204,12 +238,30 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 				ip := ipLayer.(*layers.IPv4)
 
 				// LAN packets
-				if commander.Adapter.Network.Contains(ip.DstIP) {
-					if id, ok := commander.Junction.GetID(ip.DstIP.String()); ok {
+				if commander.Adapter.Local.InNet(ip.DstIP) {
+					if id, ok := commander.Junction.GetID(ip.DstIP[3]); ok {
+						eth.SrcMAC = commander.Junction.Hub[id].Agent.GetMAC()
+						eth.DstMAC = commander.Junction.Hub[id].From.GetMAC()
+						ip.SrcIP = commander.Junction.Hub[id].Agent.LocalizeIP(ip.SrcIP)
+						ip.DstIP = commander.Junction.Hub[id].Agent.LocalizeIP(ip.DstIP)
+						buffer := gopacket.NewSerializeBuffer()
+						if err := gopacket.SerializeLayers(
+							buffer,
+							gopacket.SerializeOptions{
+								FixLengths:       true,
+								ComputeChecksums: true,
+							},
+							eth,
+							ip,
+							gopacket.Payload(ipLayer.LayerPayload()),
+						); err != nil {
+							logger.Error("repack the LAN ipv4 error:%v", err)
+							return
+						}
 						frame := &Frame{
 							Type:     SrvEndToEnd,
 							Reserved: id,
-							Payload:  p.Object.Data(),
+							Payload:  buffer.Bytes(),
 						}
 						frameBytes = frame.Encode()
 						return
@@ -245,6 +297,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 								gopacket.Payload(tcpLayer.LayerPayload()),
 							); err != nil {
 								logger.Error("repack the tcp to gateway error:%v", err)
+								return
 							}
 							packetBytes = buffer.Bytes()
 							return
@@ -277,6 +330,7 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 								gopacket.Payload(udpLayer.LayerPayload()),
 							); err != nil {
 								logger.Error("repack the udp to gateway error:%v", err)
+								return
 							}
 							packetBytes = buffer.Bytes()
 							return
@@ -311,42 +365,4 @@ func (p *Packet) Repack(commander *Commander) (packetBytes []byte, frameBytes []
 		}
 	}
 	return
-}
-
-// TODO make in the local client
-func (p *Packet) ModifyLANGratuitousARP(commander *Commander) []byte {
-	// eth.DstMAC: ff:ff:ff:ff:ff:ff
-	// arp.DstHwAddress: 00:00:00:00:00:00
-	eth := p.Object.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
-	arp := p.Object.Layer(layers.LayerTypeARP).(*layers.ARP)
-	eth.SrcMAC = commander.Adapter.GetLocalMAC()
-	arp.SourceHwAddress = eth.SrcMAC
-	buffer := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(
-		buffer,
-		gopacket.SerializeOptions{},
-		eth,
-		arp,
-	); err != nil {
-		logger.Error("failed to modify the gratuitous arp:%v", err)
-	}
-	return buffer.Bytes()
-}
-
-// TODO save local mac and console mac to the clients
-func (p *Packet) ModifyLANIPv4(commander *Commander) []byte {
-	ethLayer := p.Object.Layer(layers.LayerTypeEthernet)
-	eth := ethLayer.(*layers.Ethernet)
-	eth.SrcMAC = commander.Adapter.GetLocalMAC()
-	eth.DstMAC = commander.Adapter.GetConsoleMAC()
-	buffer := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(
-		buffer,
-		gopacket.SerializeOptions{},
-		eth,
-		gopacket.Payload(ethLayer.LayerPayload()),
-	); err != nil {
-		logger.Error("failed to modify the gratuitous arp:%v", err)
-	}
-	return buffer.Bytes()
 }

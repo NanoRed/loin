@@ -13,11 +13,11 @@ var (
 	// EndpointSecondaryDNS *Endpoint = &Endpoint{&Address{IP: net.ParseIP("207.246.121.77")}}
 
 	// Cisco OpenDNS
-	PrimaryDNS   *Endpoint = &Endpoint{&Address{IP: net.ParseIP("208.67.222.222")}}
-	SecondaryDNS *Endpoint = &Endpoint{&Address{IP: net.ParseIP("208.67.220.220")}}
+	PrimaryDNS   *Endpoint = &Endpoint{&Address{IPNet: &net.IPNet{IP: net.ParseIP("208.67.222.222")}}}
+	SecondaryDNS *Endpoint = &Endpoint{&Address{IPNet: &net.IPNet{IP: net.ParseIP("208.67.220.220")}}}
 
 	// lan server
-	LANServer *Endpoint = &Endpoint{&Address{IP: net.ParseIP("106.52.81.44"), Port: &Port{PortTypeTCP, 7714}}}
+	LANServer *Endpoint = &Endpoint{&Address{IPNet: &net.IPNet{IP: net.ParseIP("106.52.81.44")}, Port: &Port{PortTypeTCP, 7714}}}
 )
 
 type PortType uint8
@@ -54,28 +54,56 @@ func (p *Port) GetNumber() PortNumber {
 }
 
 type Address struct {
-	IP   net.IP
-	MAC  net.HardwareAddr
-	Port *Port
+	IPNet *net.IPNet
+	MAC   net.HardwareAddr
+	Port  *Port
 }
 
 type Endpoint struct {
 	Address *Address
 }
 
+func (e *Endpoint) InNet(ip net.IP) bool {
+	return e.Address.IPNet.Contains(ip)
+}
+
+func (e *Endpoint) LocalizeIP(ip net.IP) (newIP net.IP) {
+	newIP = make(net.IP, 4)
+	for i, seg := range e.Address.IPNet.Mask {
+		newIP[i] = ip[i] & ^seg
+		newIP[i] |= e.Address.IPNet.IP[i] & seg
+	}
+	return
+}
+
+func (e *Endpoint) GetNetwork() string {
+	ones, _ := e.Address.IPNet.Mask.Size()
+	ip := make(net.IP, 4)
+	for i, seg := range e.Address.IPNet.Mask {
+		ip[i] |= e.Address.IPNet.IP[i] & seg
+	}
+	return fmt.Sprintf("%s/%d", ip.String(), ones)
+}
+
 func (e *Endpoint) GetIPPort() string {
-	return fmt.Sprintf("%s:%d", e.Address.IP, e.Address.Port.Number)
+	return fmt.Sprintf("%s:%d", e.Address.IPNet.IP, e.Address.Port.Number)
 }
 
 func (e *Endpoint) GetIP() (ip net.IP) {
-	return e.Address.IP
+	return e.Address.IPNet.IP
+}
+
+func (e *Endpoint) GetMask() (mask net.IPMask) {
+	return e.Address.IPNet.Mask
 }
 
 func (e *Endpoint) SetIP(ip net.IP) {
 	if e.Address == nil {
-		e.Address = &Address{}
+		e.Address = &Address{IPNet: &net.IPNet{}}
+	} else if e.Address.IPNet == nil {
+		e.Address.IPNet = &net.IPNet{}
 	}
-	e.Address.IP = ip
+	e.Address.IPNet.IP = ip
 }
 
 func (e *Endpoint) GetMAC() (mac net.HardwareAddr) {

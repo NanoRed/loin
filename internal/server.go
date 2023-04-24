@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net"
 	"time"
 
@@ -63,6 +64,7 @@ func (s *Server) Handle(link *Link) {
 					logger.Error("failed to write end to end frame:%v", err)
 					return
 				}
+				logger.Info("frame(%d) to %d", len(frame.Payload), frame.Reserved)
 			} else {
 				logger.Warn("link unavailable:%d", frame.Reserved)
 			}
@@ -71,7 +73,7 @@ func (s *Server) Handle(link *Link) {
 			b.Write(reader.Header)
 			b.Write(frame.Payload)
 			frameBytes := b.Bytes()
-			s.Junction.Range(func(key string, id int, link *Link) {
+			s.Junction.Range(func(key byte, id int, link *Link) {
 				go func() {
 					if id != frame.Reserved {
 						if _, err := link.SafeWrite(frameBytes); err != nil {
@@ -81,23 +83,28 @@ func (s *Server) Handle(link *Link) {
 					}
 				}()
 			})
+			logger.Info("broadcast frame(%d) from %d", len(frame.Payload), frame.Reserved)
 		case SrvHeartbeat:
 			continue
 		case SrvRegister:
+			link.Agent = &Endpoint{}
 			link.From = &Endpoint{}
-			link.From.Decode(frame.Payload)
+			agentDataSize := binary.BigEndian.Uint16(frame.Payload)
+			link.Agent.Decode(frame.Payload[3 : 3+agentDataSize])
+			link.From.Decode(frame.Payload[3+agentDataSize:])
 			if id, ok := s.Junction.Register(link); ok {
 				defer s.Junction.Unregister(id)
 				logger.Info("%s successfully registered", link.From.GetIP().String())
-				frame := &Frame{
-					Type:    CliJunction,
-					Payload: s.Junction.EncodeGuide(),
-				}
-				frameBytes := frame.Encode()
+				payload := s.Junction.Encode()
 				// broadcast the junction guide
-				s.Junction.Range(func(key string, id int, link *Link) {
+				s.Junction.Range(func(key byte, id int, link *Link) {
 					go func() {
-						if _, err := link.SafeWrite(frameBytes); err != nil {
+						frame := &Frame{
+							Type:     CliJunction,
+							Reserved: id,
+							Payload:  payload,
+						}
+						if _, err := link.SafeWrite(frame.Encode()); err != nil {
 							logger.Error("failed to write junction frame:%d %v", id, err)
 							link.Close()
 						}
