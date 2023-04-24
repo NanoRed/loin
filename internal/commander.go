@@ -2,7 +2,6 @@ package internal
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -131,6 +130,8 @@ func (c *Commander) ConnectToServer(a ...any) {
 	if err != nil {
 		logger.Panic("can't dial to the LAN server")
 	}
+	c.Client.Agent = c.Adapter.Local
+	c.Client.From = c.Adapter.Console
 	var block chan struct{}
 	if len(a) == 0 {
 		block = make(chan struct{}, 1)
@@ -148,16 +149,9 @@ func (c *Commander) ConnectToServer(a ...any) {
 		go func() {
 			defer c.Client.Close()
 			// register
-			var buffer bytes.Buffer
-			agentData := c.Adapter.Local.Encode()
-			agentDataSize := make([]byte, 2)
-			binary.BigEndian.PutUint16(agentDataSize, uint16(len(agentData)))
-			buffer.Write(agentDataSize)
-			buffer.Write(agentData)
-			buffer.Write(c.Adapter.Console.Encode())
 			frame := &Frame{
 				Type:    SrvRegister,
-				Payload: buffer.Bytes(),
+				Payload: c.Client.Encode(),
 			}
 			if _, err := c.Client.SafeWrite(frame.Encode()); err != nil {
 				logger.Error("failed to register:%v", err)

@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"bytes"
-	"encoding/gob"
 	"fmt"
 	"net"
 )
@@ -126,14 +124,4 @@ func (e *Endpoint) SetPort(port *Port) {
 		e.Address = &Address{}
 	}
 	e.Address.Port = port
-}
-
-func (e *Endpoint) Encode() []byte {
-	var buffer bytes.Buffer
-	gob.NewEncoder(&buffer).Encode(e)
-	return buffer.Bytes()
-}
-
-func (e *Endpoint) Decode(b []byte) {
-	gob.NewDecoder(bytes.NewBuffer(b)).Decode(e)
 }

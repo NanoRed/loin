@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"bytes"
+	"encoding/gob"
 	"net"
 	"sync"
 	"time"
@@ -83,6 +85,22 @@ func (l *Link) SafeWrite(b []byte) (n int, err error) {
 		n, err = l.Conn.Write(b)
 	}
 	return
+}
+
+func (l *Link) Encode() []byte {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	encoder.Encode(*l.Agent)
+	encoder.Encode(*l.From)
+	return buffer.Bytes()
+}
+
+func (l *Link) Decode(b []byte) {
+	decoder := gob.NewDecoder(bytes.NewBuffer(b))
+	l.Agent = &Endpoint{}
+	l.From = &Endpoint{}
+	decoder.Decode(l.Agent)
+	decoder.Decode(l.From)
 }
 
 func (l *Link) Close() {

@@ -55,6 +55,7 @@ func LocalAdapter() (adapter *Adapter) {
 			switch v := addr.(type) {
 			case *net.IPNet:
 				if v.IP.IsGlobalUnicast() && v.Contains(gatewayIPv4) {
+					v.IP = v.IP.To4()
 					adapter = &Adapter{
 						Name: iface.Name,
 						Local: &Endpoint{
@@ -106,6 +107,7 @@ func ServerAdapter() (adapter *Adapter) {
 			switch v := addr.(type) {
 			case *net.IPNet:
 				if v.IP.IsGlobalUnicast() && v.Contains(gatewayIPv4) {
+					v.IP = v.IP.To4()
 					adapter = &Adapter{
 						Name: iface.Name,
 						Local: &Endpoint{

@@ -2,7 +2,6 @@ package internal
 
 import (
 	"bytes"
-	"encoding/binary"
 	"net"
 	"time"
 
@@ -87,11 +86,7 @@ func (s *Server) Handle(link *Link) {
 		case SrvHeartbeat:
 			continue
 		case SrvRegister:
-			link.Agent = &Endpoint{}
-			link.From = &Endpoint{}
-			agentDataSize := binary.BigEndian.Uint16(frame.Payload)
-			link.Agent.Decode(frame.Payload[3 : 3+agentDataSize])
-			link.From.Decode(frame.Payload[3+agentDataSize:])
+			link.Decode(frame.Payload)
 			if id, ok := s.Junction.Register(link); ok {
 				defer s.Junction.Unregister(id)
 				logger.Info("%s successfully registered", link.From.GetIP().String())

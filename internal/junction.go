@@ -11,14 +11,15 @@ const (
 )
 
 type Junction struct {
-	Hub   [HubMaxLen]*Link `gob:"Hub"`
-	Free  chan int         `gob:"-"`
-	Guide map[byte]int     `gob:"Guide"`
-	Lock  sync.RWMutex     `gob:"-"`
+	Hub   []*Link
+	Free  chan int
+	Guide map[byte]int
+	Lock  sync.RWMutex
 }
 
 func NewJunction() (junction *Junction) {
 	junction = &Junction{
+		Hub:   make([]*Link, HubMaxLen),
 		Guide: make(map[byte]int),
 		Free:  make(chan int, HubMaxLen),
 	}
@@ -73,14 +74,34 @@ func (j *Junction) Encode() []byte {
 	j.Lock.RLock()
 	defer j.Lock.RUnlock()
 	var buffer bytes.Buffer
-	gob.NewEncoder(&buffer).Encode(j)
+	encoder := gob.NewEncoder(&buffer)
+	encoder.Encode(j.Guide)
+	for i := 0; i < len(j.Hub); i++ {
+		if link := j.Hub[i]; link != nil {
+			encoder.Encode(i)
+			encoder.Encode(*link.Agent)
+			encoder.Encode(*link.From)
+		}
+	}
 	return buffer.Bytes()
 }
 
 func (j *Junction) Decode(b []byte) {
 	j.Lock.Lock()
 	defer j.Lock.Unlock()
-	gob.NewDecoder(bytes.NewBuffer(b)).Decode(&j)
+	decoder := gob.NewDecoder(bytes.NewBuffer(b))
+	decoder.Decode(&j.Guide)
+	var i int
+	j.Hub = make([]*Link, HubMaxLen)
+	for {
+		if err := decoder.Decode(&i); err != nil {
+			break
+		}
+		link := &Link{Agent: &Endpoint{}, From: &Endpoint{}}
+		j.Hub[i] = link
+		decoder.Decode(link.Agent)
+		decoder.Decode(link.From)
+	}
 }
 
 func (j *Junction) Close() {
