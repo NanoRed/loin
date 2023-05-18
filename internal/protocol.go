@@ -36,7 +36,7 @@ type Frame struct {
 }
 
 func (f *Frame) Encode() []byte {
-	header := make([]byte, 2, 2048)
+	header := make([]byte, 2)
 	binary.BigEndian.PutUint16(header, uint16(len(f.Payload)))
 	header[0] |= byte(f.Type) << 6
 	header[0] |= byte(f.Reserved) << 3
