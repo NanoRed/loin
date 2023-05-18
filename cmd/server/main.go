@@ -21,7 +21,7 @@ func main() {
 	}()
 
 	// start to serve
-	logger.Pure("loin server started")
+	logger.Pure("Loin server started")
 	adapter := internal.ServerAdapter()
 	internal.NewServer(adapter.Local).ListenAndServe()
 }
